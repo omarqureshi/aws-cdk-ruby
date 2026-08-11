@@ -1,0 +1,9 @@
+{
+  "name": "aws-cdk-ruby",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Ruby naming and distribution for aws-cdk-lib, built with jsii-target-ruby",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}
