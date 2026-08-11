@@ -1,0 +1,96 @@
+name: build
+
+# Generates the aws-cdk-lib Ruby bindings and checks this repository's naming
+# against them. Deliberately builds nothing that leaves the runner: publishing
+# gems and documentation is a separate, dispatch-only concern.
+#
+# The toolchain wiring (jsii, jsii-rosetta, the plugin, and the check that
+# pacmak and the plugin resolve the *same* rosetta) is the plugin's composite
+# action, used here rather than copied — a copy of that wiring would drift and
+# the drift is silent.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      aws-cdk-lib-version:
+        description: aws-cdk-lib version to build against (npm dist-tag or exact version)
+        default: latest
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout the Ruby target
+        uses: actions/checkout@v4
+        with:
+          repository: omarqureshi/jsii-target-ruby
+          ref: main
+          path: plugin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Bootstrap toolchain
+        uses: omarqureshi/jsii-target-ruby/.github/actions/bootstrap-toolchain@main
+        with:
+          plugin-path: plugin
+
+      - name: Install aws-cdk-lib
+        id: install
+        run: |
+          mkdir -p work && cd work
+          npm init -y > /dev/null
+          npm install --save "aws-cdk-lib@${{ inputs.aws-cdk-lib-version || 'latest' }}"
+          echo "version=$(node -p "require('$PWD/node_modules/aws-cdk-lib/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check the naming profile against that release
+        # Fails when aws-cdk-lib has gained a submodule nobody has named. That
+        # is the point: an unnamed submodule ships as a derived guess and
+        # becomes permanent public API.
+        run: |
+          ln -sfn "$PWD/plugin" node_modules/jsii-target-ruby 2>/dev/null || {
+            mkdir -p node_modules && ln -sfn "$PWD/plugin" node_modules/jsii-target-ruby; }
+          AWS_CDK_LIB="$PWD/work/node_modules/aws-cdk-lib" node --test test/*.test.js
+
+      - name: Generate the Ruby bindings
+        env:
+          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/profile.json
+        run: |
+          cd work
+          node --max-old-space-size=8192 \
+            "${GITHUB_WORKSPACE}/toolchain/jsii/packages/jsii-pacmak/bin/jsii-pacmak" \
+            --plugin "${GITHUB_WORKSPACE}/plugin" \
+            -t ruby --code-only --force-target --recurse \
+            -o dist node_modules/aws-cdk-lib
+          echo "generated $(find dist -name '*.rb' | wc -l) Ruby files"
+
+      - name: Check every generated file parses
+        # A file that does not parse is never loaded, so nothing downstream
+        # would notice until a user required it.
+        run: |
+          bad=0
+          while IFS= read -r f; do
+            ruby -c "$f" >/dev/null 2>&1 || { echo "does not parse: $f"; bad=$((bad + 1)); }
+          done < <(find work/dist -name '*.rb')
+          echo "$bad file(s) failed to parse"
+          [ "$bad" -eq 0 ]
+
+      - name: Upload the bindings
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-cdk-lib-ruby-${{ steps.install.outputs.version }}
+          path: work/dist
+          if-no-files-found: error
