@@ -147,6 +147,9 @@
       "aws-cdk-lib.aws_arczonalshift": {
         "module": "AWSCDK::ARCZonalShift"
       },
+      "aws-cdk-lib.aws_artifact": {
+        "module": "AWSCDK::Artifact"
+      },
       "aws-cdk-lib.aws_athena": {
         "module": "AWSCDK::Athena"
       },
@@ -176,6 +179,9 @@
       },
       "aws-cdk-lib.aws_backupgateway": {
         "module": "AWSCDK::BackupGateway"
+      },
+      "aws-cdk-lib.aws_backupsearch": {
+        "module": "AWSCDK::BackupSearch"
       },
       "aws-cdk-lib.aws_batch": {
         "module": "AWSCDK::Batch"
@@ -290,6 +296,9 @@
       },
       "aws-cdk-lib.aws_cognito_identitypool": {
         "module": "AWSCDK::CognitoIdentitypool"
+      },
+      "aws-cdk-lib.aws_cognitosync": {
+        "module": "AWSCDK::CognitoSync"
       },
       "aws-cdk-lib.aws_comprehend": {
         "module": "AWSCDK::Comprehend"
@@ -693,6 +702,9 @@
       "aws-cdk-lib.aws_networkfirewall": {
         "module": "AWSCDK::NetworkFirewall"
       },
+      "aws-cdk-lib.aws_networkflowmonitor": {
+        "module": "AWSCDK::NetworkFlowMonitor"
+      },
       "aws-cdk-lib.aws_networkmanager": {
         "module": "AWSCDK::NetworkManager"
       },
@@ -891,6 +903,9 @@
       "aws-cdk-lib.aws_scheduler_targets": {
         "module": "AWSCDK::SchedulerTargets"
       },
+      "aws-cdk-lib.aws_scn": {
+        "module": "AWSCDK::SCN"
+      },
       "aws-cdk-lib.aws_sdb": {
         "module": "AWSCDK::SDB"
       },
@@ -960,11 +975,17 @@
       "aws-cdk-lib.aws_sso": {
         "module": "AWSCDK::SSO"
       },
+      "aws-cdk-lib.aws_states": {
+        "module": "AWSCDK::States"
+      },
       "aws-cdk-lib.aws_stepfunctions": {
         "module": "AWSCDK::StepFunctions"
       },
       "aws-cdk-lib.aws_stepfunctions_tasks": {
         "module": "AWSCDK::StepFunctionsTasks"
+      },
+      "aws-cdk-lib.aws_storagegateway": {
+        "module": "AWSCDK::StorageGateway"
       },
       "aws-cdk-lib.aws_supportapp": {
         "module": "AWSCDK::SupportApp"
@@ -975,11 +996,20 @@
       "aws-cdk-lib.aws_systemsmanagersap": {
         "module": "AWSCDK::SystemsManagerSAP"
       },
+      "aws-cdk-lib.aws_thinclient": {
+        "module": "AWSCDK::ThinClient"
+      },
       "aws-cdk-lib.aws_timestream": {
         "module": "AWSCDK::Timestream"
       },
+      "aws-cdk-lib.aws_transcribe": {
+        "module": "AWSCDK::Transcribe"
+      },
       "aws-cdk-lib.aws_transfer": {
         "module": "AWSCDK::Transfer"
+      },
+      "aws-cdk-lib.aws_usernotifications": {
+        "module": "AWSCDK::UserNotifications"
       },
       "aws-cdk-lib.aws_uxc": {
         "module": "AWSCDK::UXC"
@@ -1001,6 +1031,9 @@
       },
       "aws-cdk-lib.aws_wafv2": {
         "module": "AWSCDK::WAFv2"
+      },
+      "aws-cdk-lib.aws_wellarchitected": {
+        "module": "AWSCDK::WellArchitected"
       },
       "aws-cdk-lib.aws_wisdom": {
         "module": "AWSCDK::Wisdom"
