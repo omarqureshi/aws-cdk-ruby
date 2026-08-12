@@ -142,7 +142,13 @@ jobs:
             --rosetta-tablet "$TABLET" \
             --rosetta-unknown-snippets=translate \
             -o "${workdir}/dist" "${workdir}/node_modules/aws-cdk-lib"
-          (cd plugin/runtime && gem build jsii-ruby-runtime.gemspec && mv jsii-ruby-runtime-*.gem "${workdir}/dist/ruby/")
+          # The runtime gem is not built here. It is the target's artifact,
+          # published from jsii-target-ruby, and generated packages depend on
+          # `jsii-ruby-runtime ~> 0.1` — a range — so they resolve whatever
+          # compatible runtime is on the feed. Building it alongside would give
+          # one artifact two publishers, and since `gem build` is not
+          # byte-reproducible each would change the checksum the feed
+          # advertises for a version already in people's lockfiles.
           ls -la "${workdir}/dist/ruby/"*.gem
 
       - name: Syntax-check every generated file
@@ -156,6 +162,12 @@ jobs:
         run: |
           workdir="${{ runner.temp }}/cdk-build"
           export GEM_HOME="${workdir}/gemhome"
+          # The runtime comes from the feed, so this exercises the pairing a
+          # consumer actually gets: these gems against the published runtime.
+          # Installing one built in this same run would test a combination
+          # nobody has.
+          gem install jsii-ruby-runtime --no-document \
+            --source https://rubygems.omarqureshi.net --source https://rubygems.org
           (cd "${workdir}/dist/ruby" && gem install --local --no-document ./*.gem)
           JSII_RUNTIME="${workdir}/node_modules/@jsii/runtime/bin/jsii-runtime" \
             ruby plugin/scripts/synth-smoke.rb
