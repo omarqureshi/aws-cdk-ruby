@@ -200,10 +200,32 @@ jobs:
           # gem another publisher added between the read and the write silently
           # vanishes from the index while still sitting in the bucket. So the
           # gems go up and the owner is told; see the site's refresh workflow.
+          # Never overwrite a published version. `gem build` is not
+          # byte-reproducible, so re-uploading one changes the checksum the feed
+          # advertises for it, and `bundle install` fails for anyone holding it
+          # in a lockfile.
+          #
+          # This is routine rather than exceptional, because shared dependencies
+          # appear in more than one closure: `constructs` is a dependency of
+          # both aws-cdk-lib and cdk8s, so whichever repository publishes second
+          # will already find its version there. Skipping is the correct
+          # outcome, not a problem to report loudly.
+          #
+          # To republish a version deliberately, delete it first — the bucket is
+          # versioned, so that is recoverable — or bump the version.
+          added=0; skipped=0
           for gem_file in "${workdir}/dist/ruby/"*.gem; do
-            aws s3 cp "$gem_file" "s3://$BUCKET/gems/$(basename "$gem_file")" --no-progress >/dev/null
+            key="gems/$(basename "$gem_file")"
+            if aws s3api head-object --bucket "$BUCKET" --key "$key" >/dev/null 2>&1; then
+              echo "  already published, leaving alone: $(basename "$gem_file")"
+              skipped=$((skipped + 1))
+              continue
+            fi
+            aws s3 cp "$gem_file" "s3://$BUCKET/$key" --no-progress >/dev/null
+            echo "  added: $(basename "$gem_file")"
+            added=$((added + 1))
           done
-          echo "uploaded $(ls "${workdir}/dist/ruby/"*.gem | wc -l) gems"
+          echo "added $added gem(s), left $skipped already-published one(s) alone"
 
           # Provenance beside the gems: what was built, and from what.
           cdk_version=$(basename "${workdir}"/dist/ruby/aws-cdk-lib-*.gem .gem | sed 's/^aws-cdk-lib-//')
@@ -220,8 +242,8 @@ jobs:
           MANIFEST
           aws s3 cp "$manifest" "s3://$BUCKET/manifests/aws-cdk-lib-${cdk_version}.json" --no-progress >/dev/null
 
-          # Each gem must actually be there before anything downstream is told
-          # it is.
+          # Every gem must be present before anything downstream is told it is —
+          # whether this run added it or found it already there.
           for gem_file in "${workdir}/dist/ruby/"*.gem; do
             key="gems/$(basename "$gem_file")"
             aws s3api head-object --bucket "$BUCKET" --key "$key" >/dev/null \
