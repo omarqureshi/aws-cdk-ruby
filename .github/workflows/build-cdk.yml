@@ -196,32 +196,51 @@ jobs:
       - name: Ask the site to reindex
         if: inputs.publish
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A cross-repository dispatch needs a token with access to the other
+          # repository; the default GITHUB_TOKEN is scoped to this one and
+          # cannot do it. SITE_DISPATCH_TOKEN is a fine-grained PAT with
+          # contents:write on rubygems.omarqureshi.net. Without it the site
+          # picks the change up on its own schedule instead, so publishing
+          # still completes — just not instantly.
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
         run: |
-          # The index and the cache are recomputed by the repository that owns
-          # them, from what the bucket holds. Until that runs, the new gems are
-          # in the bucket but not yet advertised — which is the safe order: a
-          # gem listed but absent is a broken install, a gem present but not yet
-          # listed is merely not visible yet.
-          gh api -X POST repos/omarqureshi/rubygems.omarqureshi.net/dispatches \
-            -f event_type=gems-published \
-            -f client_payload[library]=aws-cdk-lib \
-            -f client_payload[version]="$CDK_VERSION" \
-            && echo "notified the site repository" \
-            || { echo "::error::could not notify the site; the feed index is now stale"; exit 1; }
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::no SITE_DISPATCH_TOKEN; the site will reindex on its schedule (within 20 minutes)"
+            echo "DISPATCHED=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if gh api -X POST repos/omarqureshi/rubygems.omarqureshi.net/dispatches \
+               -f event_type=gems-published \
+               -f client_payload[library]=aws-cdk-lib \
+               -f client_payload[version]="$CDK_VERSION"; then
+            echo "notified the site repository"
+            echo "DISPATCHED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::dispatch failed; the site will reindex on its schedule"
+            echo "DISPATCHED=false" >> "$GITHUB_ENV"
+          fi
 
-          # The install check below reads through CloudFront, so wait for the
-          # reindex rather than racing it.
-          echo "waiting for the site to reindex..."
-          for _ in $(seq 1 30); do
-            sleep 20
+      - name: Wait for the feed to advertise the new version
+        if: inputs.publish
+        run: |
+          # The gems are in the bucket; until the index is rebuilt they are not
+          # advertised. That is the safe order — a gem present but unlisted is
+          # invisible, a gem listed but absent is a broken install — but the
+          # check below installs through CloudFront, so wait rather than race.
+          #
+          # Twenty-five minutes covers a scheduled reindex; a dispatched one
+          # usually lands in under a minute.
+          echo "waiting for aws-cdk-lib ${CDK_VERSION} (dispatched=${DISPATCHED})"
+          for _ in $(seq 1 75); do
             if curl -fsS "https://rubygems.omarqureshi.net/info/aws-cdk-lib" 2>/dev/null \
                  | grep -q "^${CDK_VERSION} "; then
               echo "the feed advertises aws-cdk-lib ${CDK_VERSION}"
               exit 0
             fi
+            sleep 20
           done
-          echo "::error::the feed still does not advertise ${CDK_VERSION} after 10 minutes"
+          echo "::error::the feed still does not advertise ${CDK_VERSION}"
+          echo "run the site's refresh workflow, then re-run the verification below"
           exit 1
 
       - name: Verify by installing from the public feed
