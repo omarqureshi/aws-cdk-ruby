@@ -85,7 +85,8 @@ jobs:
       # retranslates snippets whose source or translator version changed, so a
       # rebuild of an unchanged library does no translation at all.
       - name: Restore translation tablet
-        uses: actions/cache@v4
+        id: tablet
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/rosetta-tablet
           key: rosetta-ruby-tablet-${{ steps.install.outputs.version }}-${{ hashFiles('plugin/src/**', 'config/profile.json') }}
@@ -112,6 +113,15 @@ jobs:
             $([ -f "$cached" ] && echo "$cached")
           mv "$cache_dir/next.tabl.json" "$cached"
           echo "TABLET=$cached" >> "$GITHUB_ENV"
+
+      - name: Keep the translation tablet
+        # See build-cdk: actions/cache's implicit save is skipped when a job
+        # fails, discarding the hours of translation this cache exists for.
+        if: always() && steps.tablet.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/rosetta-tablet
+          key: ${{ steps.tablet.outputs.cache-primary-key }}
 
       - name: Generate aws-cdk-lib Ruby sources
         env:

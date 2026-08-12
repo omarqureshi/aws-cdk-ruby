@@ -80,7 +80,8 @@ jobs:
       # Shares the tablet with publish-docs: the translations are the same work,
       # and whichever workflow runs first pays for them.
       - name: Restore translation tablet
-        uses: actions/cache@v4
+        id: tablet
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/rosetta-tablet
           key: rosetta-ruby-tablet-${{ steps.install.outputs.version }}-${{ hashFiles('plugin/src/**', 'config/profile.json') }}
@@ -106,6 +107,18 @@ jobs:
           mv "$cache_dir/next.tabl.json" "$cached"
           echo "TABLET=$cached" >> "$GITHUB_ENV"
 
+      - name: Keep the translation tablet
+        # Saved here rather than by actions/cache's implicit post step, which is
+        # skipped when the job fails — so a later failure discarded the ~2 hours
+        # of translation this step exists to avoid repeating. The extract has
+        # succeeded by this point, so the tablet is worth keeping whatever
+        # happens next.
+        if: always() && steps.tablet.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/rosetta-tablet
+          key: ${{ steps.tablet.outputs.cache-primary-key }}
+
       - name: Generate and build gems (single --recurse over the installed closure)
         env:
           JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/profile.json
@@ -129,7 +142,7 @@ jobs:
             --rosetta-tablet "$TABLET" \
             --rosetta-unknown-snippets=translate \
             -o "${workdir}/dist" "${workdir}/node_modules/aws-cdk-lib"
-          (cd runtime && gem build jsii-ruby-runtime.gemspec && mv jsii-ruby-runtime-*.gem "${workdir}/dist/ruby/")
+          (cd plugin/runtime && gem build jsii-ruby-runtime.gemspec && mv jsii-ruby-runtime-*.gem "${workdir}/dist/ruby/")
           ls -la "${workdir}/dist/ruby/"*.gem
 
       - name: Syntax-check every generated file
