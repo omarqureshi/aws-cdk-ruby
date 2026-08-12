@@ -2,7 +2,7 @@ name: build-cdk
 
 # Builds Ruby gems for the AWS CDK from *published npm artifacts* through
 # stock jsii-pacmak with this plugin: naming arrives via the target-config
-# overlay (config/cdk-targets.json), no aws-cdk fork or assembly rebuild
+# profile (config/profile.json), no aws-cdk fork or assembly rebuild
 # involved. Produces the gems as workflow artifacts, gated by a naming-sync
 # check and a synth smoke test; with publish=true, pushes them to the public
 # gem feed (rubygems.omarqureshi.net) and re-verifies by installing from it.
@@ -49,8 +49,17 @@ jobs:
         with:
           ruby-version: '3.3'
 
+      - name: Checkout the Ruby target
+        uses: actions/checkout@v4
+        with:
+          repository: omarqureshi/jsii-target-ruby
+          ref: main
+          path: plugin
+
       - name: Bootstrap toolchain
-        uses: ./.github/actions/bootstrap-toolchain
+        uses: omarqureshi/jsii-target-ruby/.github/actions/bootstrap-toolchain@main
+        with:
+          plugin-path: plugin
 
       - name: Install aws-cdk-lib@${{ inputs.aws-cdk-lib-version }} (published artifacts)
         id: install
@@ -64,7 +73,9 @@ jobs:
           echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Naming-sync check (new submodules need a deliberate decision)
-        run: node scripts/check-cdk-naming.js "${{ runner.temp }}/cdk-build/node_modules/aws-cdk-lib"
+        run: |
+          mkdir -p node_modules && ln -sfn "$PWD/plugin" node_modules/jsii-target-ruby
+          AWS_CDK_LIB="${{ runner.temp }}/cdk-build/node_modules/aws-cdk-lib" node --test test/*.test.js
 
       # Shares the tablet with publish-docs: the translations are the same work,
       # and whichever workflow runs first pays for them.
@@ -72,14 +83,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/rosetta-tablet
-          key: rosetta-ruby-tablet-${{ steps.install.outputs.version }}-${{ hashFiles('src/**', 'config/cdk-targets.json') }}
+          key: rosetta-ruby-tablet-${{ steps.install.outputs.version }}-${{ hashFiles('plugin/src/**', 'config/profile.json') }}
           restore-keys: |
             rosetta-ruby-tablet-${{ steps.install.outputs.version }}-
             rosetta-ruby-tablet-
 
       - name: Extract Ruby translations
         env:
-          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/cdk-targets.json
+          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/profile.json
           # Rosetta defaults to half the cores as workers; measured at ~3GB
           # each, which overruns a 16GB runner. Cap it: the extract is bounded
           # by memory here, not by cores.
@@ -88,7 +99,7 @@ jobs:
           cache_dir="${{ runner.temp }}/rosetta-tablet"
           mkdir -p "$cache_dir"
           cached="$cache_dir/ruby.tabl.json"
-          node --max-old-space-size=8192 scripts/extract-tablet.js \
+          node --max-old-space-size=8192 plugin/scripts/extract-tablet.js \
             "${{ runner.temp }}/cdk-build/node_modules/aws-cdk-lib" \
             "$cache_dir/next.tabl.json" \
             $([ -f "$cached" ] && echo "$cached")
@@ -97,7 +108,7 @@ jobs:
 
       - name: Generate and build gems (single --recurse over the installed closure)
         env:
-          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/cdk-targets.json
+          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/profile.json
           # The feed publishes the closure atomically: every inter-gem
           # dependency is pinned to the exact version generated together.
           JSII_RUBY_PIN_DEPENDENCIES: exact
@@ -113,7 +124,7 @@ jobs:
           # snippets verbatim while still labelling the fence with the target
           # language, so docs would claim Ruby and show TypeScript.
           node --max-old-space-size=8192 toolchain/jsii/packages/jsii-pacmak/bin/jsii-pacmak \
-            --plugin "$(pwd)" \
+            --plugin "${GITHUB_WORKSPACE}/plugin" \
             -t ruby --force-target --recurse \
             --rosetta-tablet "$TABLET" \
             --rosetta-unknown-snippets=translate \
@@ -134,7 +145,7 @@ jobs:
           export GEM_HOME="${workdir}/gemhome"
           (cd "${workdir}/dist/ruby" && gem install --local --no-document ./*.gem)
           JSII_RUNTIME="${workdir}/node_modules/@jsii/runtime/bin/jsii-runtime" \
-            ruby scripts/synth-smoke.rb
+            ruby plugin/scripts/synth-smoke.rb
 
       - name: Upload gems
         uses: actions/upload-artifact@v4
@@ -175,7 +186,7 @@ jobs:
           cat > "$manifest" << MANIFEST
           {
             "aws_cdk_lib": "${cdk_version}",
-            "plugin": "${{ github.sha }}",
+            "profile": "${{ github.sha }}",
             "jsii": "$(git -C toolchain/jsii rev-parse HEAD)",
             "jsii_rosetta": "$(git -C toolchain/jsii-rosetta rev-parse HEAD)",
             "workflow_run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
@@ -256,7 +267,7 @@ jobs:
           GEMFILE
           bundle install
           JSII_RUNTIME="${workdir}/node_modules/@jsii/runtime/bin/jsii-runtime" \
-            bundle exec ruby "${GITHUB_WORKSPACE}/scripts/synth-smoke.rb"
+            bundle exec ruby "${GITHUB_WORKSPACE}/plugin/scripts/synth-smoke.rb"
 
       - name: Summary
         run: |

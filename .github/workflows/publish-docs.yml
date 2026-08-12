@@ -49,8 +49,24 @@ jobs:
         with:
           ruby-version: '3.3'
 
+      - name: Checkout the Ruby target
+        uses: actions/checkout@v4
+        with:
+          repository: omarqureshi/jsii-target-ruby
+          ref: main
+          path: plugin
+
+      - name: Checkout the documentation site
+        uses: actions/checkout@v4
+        with:
+          repository: omarqureshi/rubygems.omarqureshi.net
+          ref: main
+          path: site
+
       - name: Bootstrap toolchain
-        uses: ./.github/actions/bootstrap-toolchain
+        uses: omarqureshi/jsii-target-ruby/.github/actions/bootstrap-toolchain@main
+        with:
+          plugin-path: plugin
 
       - name: Install YARD + redcarpet + rouge
         run: gem install yard redcarpet rouge --no-document
@@ -72,14 +88,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/rosetta-tablet
-          key: rosetta-ruby-tablet-${{ steps.install.outputs.version }}-${{ hashFiles('src/**', 'config/cdk-targets.json') }}
+          key: rosetta-ruby-tablet-${{ steps.install.outputs.version }}-${{ hashFiles('plugin/src/**', 'config/profile.json') }}
           restore-keys: |
             rosetta-ruby-tablet-${{ steps.install.outputs.version }}-
             rosetta-ruby-tablet-
 
       - name: Extract Ruby translations
         env:
-          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/cdk-targets.json
+          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/profile.json
           # Rosetta defaults to half the cores as workers; measured at ~3GB
           # each, which overruns a 16GB runner. Cap it: the extract is bounded
           # by memory here, not by cores.
@@ -91,7 +107,7 @@ jobs:
           cached="$cache_dir/ruby.tabl.json"
           # Extract reads the previous tablet and writes the new one beside it;
           # writing in place would lose the cache if the run failed part-way.
-          node --max-old-space-size=8192 "${GITHUB_WORKSPACE}/scripts/extract-tablet.js" \
+          node --max-old-space-size=8192 "${GITHUB_WORKSPACE}/plugin/scripts/extract-tablet.js" \
             "$workdir/node_modules/aws-cdk-lib" "$cache_dir/next.tabl.json" \
             $([ -f "$cached" ] && echo "$cached")
           mv "$cache_dir/next.tabl.json" "$cached"
@@ -99,7 +115,7 @@ jobs:
 
       - name: Generate aws-cdk-lib Ruby sources
         env:
-          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/cdk-targets.json
+          JSII_RUBY_TARGET_CONFIG: ${{ github.workspace }}/config/profile.json
         run: |
           workdir="${{ runner.temp }}/docs-build"
           cd "$workdir"
@@ -107,7 +123,7 @@ jobs:
           # tablet would otherwise come back verbatim while still being
           # labelled Ruby, so the docs would claim Ruby and show TypeScript.
           node --max-old-space-size=8192 "${GITHUB_WORKSPACE}/toolchain/jsii/packages/jsii-pacmak/bin/jsii-pacmak" \
-            --plugin "${GITHUB_WORKSPACE}" \
+            --plugin "${GITHUB_WORKSPACE}/plugin" \
             -t ruby --code-only --force-target \
             --rosetta-tablet "$TABLET" \
             --rosetta-unknown-snippets=translate \
@@ -118,7 +134,7 @@ jobs:
           # script refuses to write an assembly with zero submodule names,
           # so a broken overlay fails here instead of publishing an empty
           # module list.
-          node "${GITHUB_WORKSPACE}/scripts/effective-assembly.js" \
+          node "${GITHUB_WORKSPACE}/plugin/scripts/effective-assembly.js" \
             node_modules/aws-cdk-lib "$workdir/effective.jsii.gz"
           echo "GEM_LIB=$workdir/dist/ruby/lib/aws-cdk-lib" >> "$GITHUB_ENV"
           echo "ASSEMBLY=$workdir/effective.jsii.gz" >> "$GITHUB_ENV"
@@ -127,19 +143,19 @@ jobs:
         run: |
           OUT="${{ runner.temp }}/docs-site"
           rm -rf "$OUT" && mkdir -p "$OUT"
-          bash docs-gen/build-module-docs.sh "$GEM_LIB" "$OUT"
-          ruby docs-gen/gen-module-landing.rb "$ASSEMBLY" "$OUT"
-          ruby docs-gen/inject-crumb.rb "$OUT"
+          bash site/docs-gen/build-module-docs.sh "$GEM_LIB" "$OUT"
+          ruby site/docs-gen/gen-module-landing.rb "$ASSEMBLY" "$OUT" config/profile.json
+          ruby site/docs-gen/inject-crumb.rb "$OUT"
           # Statics are read as constants (Jsii::StaticConstants); YARD lists
           # them as the singleton methods they are defined as. Show the
           # spelling the docs actually teach.
-          ruby docs-gen/constantize-static-reads.rb "$OUT"
-          ruby docs-gen/gen-index.rb "$ASSEMBLY" "$OUT"
+          ruby plugin/docs-gen/constantize-static-reads.rb "$OUT"
+          ruby site/docs-gen/gen-index.rb "$ASSEMBLY" "$OUT" config/profile.json
           echo "DOCS_OUT=$OUT" >> "$GITHUB_ENV"
           # Ask the same derivation the generators use rather than naming
           # AWSCDK here — and let it fail the build, because a docs tree with
           # no identifiable root module is one that would publish empty.
-          ROOT=$(ruby -r./docs-gen/root_module -e 'print DocsRoot.detect(ARGV[0])' "$OUT")
+          ROOT=$(ruby -Isite/docs-gen -rroot_module -e 'print DocsRoot.detect(ARGV[0])' "$OUT")
           echo "built $(find "$OUT/$ROOT" -maxdepth 1 -type d | wc -l) module dirs under $ROOT"
 
       - name: Upload site artifact
@@ -180,7 +196,7 @@ jobs:
           # library name twice — docs/AWSCDK/2.263.0/AWSCDK/S3/Bucket.html —
           # which nobody types, because the alias lands on this version's own
           # index.html and that redirects inwards.
-          ROOT=$(ruby -r./docs-gen/root_module -e 'print DocsRoot.detect(ARGV[0])' "$DOCS_OUT")
+          ROOT=$(ruby -Isite/docs-gen -rroot_module -e 'print DocsRoot.detect(ARGV[0])' "$DOCS_OUT")
           DEST="s3://$BUCKET/docs/$ROOT/$VERSION/"
           echo "publishing $ROOT $VERSION -> $DEST"
           aws s3 sync "$DOCS_OUT" "$DEST" --no-progress
