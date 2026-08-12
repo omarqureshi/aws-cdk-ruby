@@ -156,18 +156,49 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsCDKRole
           aws-region: us-east-1
 
-      - name: Sync to S3 + invalidate CloudFront
+      - name: Publish to this version's own prefix
         if: inputs.publish
+        env:
+          BUCKET: aws-cdk-ruby-gems
+          VERSION: ${{ steps.install.outputs.version }}
         run: |
-          aws s3 sync "$DOCS_OUT" s3://aws-cdk-ruby-gems/docs/ --delete --no-progress
-          # `Aliases.Items || []`: contains() errors on null, and distributions
-          # without aliases have no Items at all.
-          DIST_ID=$(aws cloudfront list-distributions \
-            --query "DistributionList.Items[?contains(Aliases.Items || \`[]\`, 'rubygems.omarqureshi.net')].Id | [0]" \
-            --output text)
-          if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
-            aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths '/docs/*' >/dev/null
-            echo "invalidated /docs/* on $DIST_ID"
-          else
-            echo "no CloudFront distribution for rubygems.omarqureshi.net; skipping invalidation"
-          fi
+          # Each library publishes under docs/<Library>/<version>/ and writes
+          # nowhere else. Two rules, both load-bearing:
+          #
+          #   no --delete   the destination is shared with every other library.
+          #                 --delete removes whatever is absent from *this*
+          #                 source, which is all of them.
+          #
+          #   versioned     the prefix is immutable once written, so rebuilding
+          #                 an old version cannot disturb a newer one, and a
+          #                 reader who pinned a gem can read the matching docs.
+          #
+          # Published whole, exactly as YARD built it: a class page links its
+          # stylesheet as `../css/style.css`, so the module tree and the assets
+          # beside it are one unit. Flattening the library level out would break
+          # every asset link across ~20k pages. So the deep URL carries the
+          # library name twice — docs/AWSCDK/2.263.0/AWSCDK/S3/Bucket.html —
+          # which nobody types, because the alias lands on this version's own
+          # index.html and that redirects inwards.
+          ROOT=$(ruby -r./docs-gen/root_module -e 'print DocsRoot.detect(ARGV[0])' "$DOCS_OUT")
+          DEST="s3://$BUCKET/docs/$ROOT/$VERSION/"
+          echo "publishing $ROOT $VERSION -> $DEST"
+          aws s3 sync "$DOCS_OUT" "$DEST" --no-progress
+          echo "published $(aws s3 ls "$DEST" --recursive | wc -l) objects"
+
+      - name: Ask the site to refresh its aliases and caches
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.install.outputs.version }}
+        run: |
+          # The bare docs/<Library>/ alias and the CloudFront invalidation are
+          # shared state, owned by the site repository. A publisher only knows
+          # about itself, so it cannot decide which version is newest — it says
+          # what it published and lets the owner recompute.
+          gh api -X POST repos/omarqureshi/rubygems.omarqureshi.net/dispatches \
+            -f event_type=docs-published \
+            -f client_payload[library]=AWSCDK \
+            -f client_payload[version]="$VERSION" \
+            && echo "notified the site repository" \
+            || echo "::warning::could not notify the site; run its refresh workflow by hand"
