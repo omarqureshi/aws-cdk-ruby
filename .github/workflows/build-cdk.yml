@@ -150,43 +150,29 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsCDKRole
           aws-region: us-east-1
 
-      - name: Publish gems to the public feed
+      - name: Add the gems to the feed
         if: inputs.publish
+        env:
+          BUCKET: aws-cdk-ruby-gems
         run: |
           workdir="${{ runner.temp }}/cdk-build"
-          BUCKET=aws-cdk-ruby-gems
-          REPO_DIR="${{ runner.temp }}/gem-repo"
-          mkdir -p "$REPO_DIR/gems"
 
-          # Pull the existing gems down so the regenerated index retains
-          # prior versions. Same-name gems from this run OVERWRITE (see the
-          # header note on mess-around mode).
-          aws s3 sync "s3://$BUCKET/gems/" "$REPO_DIR/gems/" --no-progress
-          cp -f "${workdir}/dist/ruby/"*.gem "$REPO_DIR/gems/"
-          echo "Total gems in repository: $(ls "$REPO_DIR/gems" | wc -l)"
+          # Add only. This repository does not own the feed's index, the
+          # stylesheets or the CloudFront cache — those describe the whole feed,
+          # and several repositories publish into it. Rebuilding an index from
+          # one publisher's view of the bucket is a read-modify-write race: a
+          # gem another publisher added between the read and the write silently
+          # vanishes from the index while still sitting in the bucket. So the
+          # gems go up and the owner is told; see the site's refresh workflow.
+          for gem_file in "${workdir}/dist/ruby/"*.gem; do
+            aws s3 cp "$gem_file" "s3://$BUCKET/gems/$(basename "$gem_file")" --no-progress >/dev/null
+          done
+          echo "uploaded $(ls "${workdir}/dist/ruby/"*.gem | wc -l) gems"
 
-          # generate_index (legacy static index) is a plugin in modern RubyGems.
-          gem install rubygems-generate_index --no-document
-          gem generate_index --directory "$REPO_DIR"
-
-          # Reconciliation guard: every gem built this run must appear in the
-          # regenerated index — fail before uploading anything.
-          ruby -rzlib -rstringio -e '
-            specs = %w[specs.4.8.gz prerelease_specs.4.8.gz].flat_map { |f|
-              path = File.join("'"$REPO_DIR"'", f)
-              File.exist?(path) ? Marshal.load(Zlib::GzipReader.new(StringIO.new(File.binread(path))).read) : []
-            }
-            indexed = specs.map { |name, version, _| "#{name}-#{version}" }
-            built = Dir.glob("'"$workdir"'/dist/ruby/*.gem").map { |f| File.basename(f, ".gem") }
-            missing = built.reject { |g| indexed.include?(g) }
-            abort("::error::gems built this run but absent from the regenerated index: #{missing.join(", ")}") unless missing.empty?
-            puts "index OK: all #{built.size} freshly built gems present"
-          '
-
-          # Provenance manifest beside the index: what was built, from what.
-          mkdir -p "$REPO_DIR/manifests"
+          # Provenance beside the gems: what was built, and from what.
           cdk_version=$(basename "${workdir}"/dist/ruby/aws-cdk-lib-*.gem .gem | sed 's/^aws-cdk-lib-//')
-          cat > "$REPO_DIR/manifests/aws-cdk-lib-${cdk_version}.json" << MANIFEST
+          manifest="${{ runner.temp }}/aws-cdk-lib-${cdk_version}.json"
+          cat > "$manifest" << MANIFEST
           {
             "aws_cdk_lib": "${cdk_version}",
             "plugin": "${{ github.sha }}",
@@ -196,34 +182,47 @@ jobs:
             "built_at": "$(date -u +%FT%TZ)"
           }
           MANIFEST
+          aws s3 cp "$manifest" "s3://$BUCKET/manifests/aws-cdk-lib-${cdk_version}.json" --no-progress >/dev/null
 
-          # Human-facing landing for the feed root, from the fresh index.
-          ruby docs-gen/gen-feed-index.rb "$REPO_DIR"
-
-          aws s3 sync "$REPO_DIR/" "s3://$BUCKET/" --no-progress
-
-          # Shared site stylesheets at the canonical /styles/ path.
-          aws s3 sync docs-gen "s3://$BUCKET/styles/" \
-            --exclude "*" --include "*.css" --content-type "text/css" --no-progress
-
-          # Spot-check: the freshly built gems must actually be in the bucket.
+          # Each gem must actually be there before anything downstream is told
+          # it is.
           for gem_file in "${workdir}/dist/ruby/"*.gem; do
             key="gems/$(basename "$gem_file")"
             aws s3api head-object --bucket "$BUCKET" --key "$key" >/dev/null \
-              || { echo "::error::$key missing from s3://$BUCKET after sync"; exit 1; }
+              || { echo "::error::$key missing from s3://$BUCKET after upload"; exit 1; }
           done
+          echo "CDK_VERSION=${cdk_version}" >> "$GITHUB_ENV"
 
-          # Consumers must see the fresh index immediately; a missing
-          # distribution means silent staleness, so fail loudly.
-          DIST_ID=$(aws cloudfront list-distributions \
-            --query "DistributionList.Items[?contains(Aliases.Items || \`[]\`, 'rubygems.omarqureshi.net')].Id | [0]" \
-            --output text)
-          if [ -z "$DIST_ID" ] || [ "$DIST_ID" = "None" ]; then
-            echo "::error::no CloudFront distribution found for rubygems.omarqureshi.net"
-            exit 1
-          fi
-          aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths '/*' >/dev/null
-          echo "published + invalidated on $DIST_ID"
+      - name: Ask the site to reindex
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The index and the cache are recomputed by the repository that owns
+          # them, from what the bucket holds. Until that runs, the new gems are
+          # in the bucket but not yet advertised — which is the safe order: a
+          # gem listed but absent is a broken install, a gem present but not yet
+          # listed is merely not visible yet.
+          gh api -X POST repos/omarqureshi/rubygems.omarqureshi.net/dispatches \
+            -f event_type=gems-published \
+            -f client_payload[library]=aws-cdk-lib \
+            -f client_payload[version]="$CDK_VERSION" \
+            && echo "notified the site repository" \
+            || { echo "::error::could not notify the site; the feed index is now stale"; exit 1; }
+
+          # The install check below reads through CloudFront, so wait for the
+          # reindex rather than racing it.
+          echo "waiting for the site to reindex..."
+          for _ in $(seq 1 30); do
+            sleep 20
+            if curl -fsS "https://rubygems.omarqureshi.net/info/aws-cdk-lib" 2>/dev/null \
+                 | grep -q "^${CDK_VERSION} "; then
+              echo "the feed advertises aws-cdk-lib ${CDK_VERSION}"
+              exit 0
+            fi
+          done
+          echo "::error::the feed still does not advertise ${CDK_VERSION} after 10 minutes"
+          exit 1
 
       - name: Verify by installing from the public feed
         if: inputs.publish
