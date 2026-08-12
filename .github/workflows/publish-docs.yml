@@ -25,13 +25,6 @@ on:
         description: sync the built site to the docs bucket (needs AWS OIDC wired for this repo)
         type: boolean
         default: false
-  schedule:
-    # Weekly rebuild (Mondays 05:00 UTC): a full build re-uploads the whole
-    # ~20k-file tree (fresh runner mtimes make `aws s3 sync` re-PUT all of
-    # it), so chaining to every gem publish makes S3 Tier-1 requests the
-    # dominant cost. The API surface changes rarely; dispatch manually after
-    # a notable change.
-    - cron: "0 5 * * 1"
 
 concurrency:
   group: gem-publish
@@ -44,7 +37,7 @@ permissions:
 jobs:
   docs:
     runs-on: ubuntu-latest
-    environment: ${{ (github.event_name == 'schedule' || inputs.publish) && 'production' || '' }}
+    environment: ${{ inputs.publish && 'production' || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -157,14 +150,14 @@ jobs:
           if-no-files-found: error
 
       - name: Configure AWS Credentials
-        if: github.event_name == 'schedule' || inputs.publish
+        if: inputs.publish
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsCDKRole
           aws-region: us-east-1
 
       - name: Sync to S3 + invalidate CloudFront
-        if: github.event_name == 'schedule' || inputs.publish
+        if: inputs.publish
         run: |
           aws s3 sync "$DOCS_OUT" s3://aws-cdk-ruby-gems/docs/ --delete --no-progress
           # `Aliases.Items || []`: contains() errors on null, and distributions
