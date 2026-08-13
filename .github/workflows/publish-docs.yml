@@ -182,6 +182,27 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsCDKRole
           aws-region: us-east-1
 
+      - name: Link references to the libraries this one depends on
+        # aws-cdk-lib's pages name Constructs::Construct, Constructs::IConstruct
+        # and Constructs::Node constantly and link them never: constructs was
+        # not in YARD's registry when they rendered, because each library
+        # renders alone.
+        #
+        # The version comes from what npm resolved and the linkable types from
+        # what is published, so a link is only written to a page that exists.
+        if: inputs.publish
+        env:
+          BUCKET: aws-cdk-ruby-gems
+        run: |
+          dep="${{ runner.temp }}/cdk-build/node_modules/constructs"
+          if [ -d "$dep" ]; then
+            mod=$(node -p "require('./config/profile.json').constructs.module")
+            ver=$(node -p "require('$dep/package.json').version")
+            ruby site/docs-gen/crosslink-tree.rb "$DOCS_OUT" "$BUCKET" "$mod=$ver"
+          else
+            echo "no constructs in the closure; nothing to link against"
+          fi
+
       - name: Publish to this version's own prefix
         if: inputs.publish
         env:
