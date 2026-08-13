@@ -1,11 +1,11 @@
 {
-  "_comment": "Ruby naming for the AWS CDK assembly closure \u2014 the JSII_RUBY_TARGET_CONFIG overlay consumed by src/target-config.ts. Upstream repos do not carry targets.ruby (external-language config never lands in an AWS repo), so the naming arrives at generation time via this file. Values are LOAD-BEARING: they become published gem and module names (permanent public API). Migrated from the fork-era publish pipeline's config (blog/.github/publish-config), which patched the same values into forked package.json files.",
+  "_comment": "Ruby naming for the AWS CDK assembly closure — the JSII_RUBY_TARGET_CONFIG overlay consumed by src/target-config.ts. Upstream repos do not carry targets.ruby (external-language config never lands in an AWS repo), so the naming arrives at generation time via this file. Values are LOAD-BEARING: they become published gem and module names (permanent public API). Migrated from the fork-era publish pipeline's config (blog/.github/publish-config), which patched the same values into forked package.json files.",
   "aws-cdk-lib": {
     "_submodulePrefix": "aws-cdk-lib names its submodules aws_<service>, while the conventional import alias leaves the prefix off (aws_iam -> iam). The target used to assume this prefix; it is a fact about this library, so it is declared here.",
     "submodulePrefix": "aws_",
     "_decisions": {
-      "acronyms": "acronym casing is case-restoring over PascalCase segmentation; submodule names are DERIVED from these plus the aws_-prefix drop (aws_s3 -> AWSCDK::S3), so a new acronym-named service landing upstream without an entry here renders PascalCase (aws_xyz -> Xyz) until added \u2014 scripts/check-cdk-naming.js flags new submodules per release.",
-      "FSX": "deliberately FSX, not AWS's FSx branding: mixed-case tokens (like IPv4) are only used where explicitly declared; module aws-fsx renders FSX. Changing this later renames published constants \u2014 breaking.",
+      "acronyms": "acronym casing is case-restoring over PascalCase segmentation; submodule names are DERIVED from these plus the aws_-prefix drop (aws_s3 -> AWSCDK::S3), so a new acronym-named service landing upstream without an entry here renders PascalCase (aws_xyz -> Xyz) until added — scripts/check-cdk-naming.js flags new submodules per release.",
+      "FSX": "deliberately FSX, not AWS's FSx branding: mixed-case tokens (like IPv4) are only used where explicitly declared; module aws-fsx renders FSX. Changing this later renames published constants — breaking.",
       "v2/V2": "version suffixes stay lowercase v2/v6 in gem names (aws-cdk-asset-node-proxy-agent-v6) and module casing follows PascalCase segmentation (V2 only where an acronym or explicit module name declares it). Matches dotnet's convention.",
       "submodules": "explicit per-submodule modules harvested from the fork branch .jsiirc files (329 entries, the original naming decisions) plus entries added per release when scripts/check-cdk-naming.js flags new submodules. 2026-08-08 additions: ControlCatalog, DataExchange, Outposts, CloudAssemblySchema (product-branding PascalCase, per ServiceCatalog/AppConfig precedent). Nested submodules derive from their parent."
     },
@@ -1083,6 +1083,39 @@
       "aws-cdk-lib.triggers": {
         "module": "AWSCDK::Triggers"
       }
+    },
+    "docs": {
+      "_comment": "Prose for this library's API reference landing page. It lives here, not in the site repository, for the same reason the naming does: it is a fact about aws-cdk-lib. The site renders what it is given and omits what it is not.",
+      "title": "AWS CDK",
+      "tagline": "API reference for the native Ruby bindings of the AWS CDK.",
+      "getting_started": {
+        "Gemfile": {
+          "code": "source 'https://rubygems.org'\n\n# The Ruby CDK preview — everything it needs comes with it.\ngem 'aws-cdk-lib', source: 'https://rubygems.omarqureshi.net'",
+          "lang": "ruby"
+        },
+        "cdk.json": {
+          "code": "{\n  \"app\": \"bundle exec ruby app.rb\"\n}",
+          "lang": "json"
+        },
+        "A stack": {
+          "code": "# stacks/my_stack.rb\nrequire 'aws-cdk-lib'\n\nclass MyStack < AWSCDK::Stack\n  def initialize(scope, id, props = nil)\n    super(scope, id, props)\n\n    AWSCDK::S3::Bucket.new(\n      self,\n      'MyBucket',\n      {\n        versioned: true,\n        removal_policy: AWSCDK::RemovalPolicy::DESTROY,\n        auto_delete_objects: true\n      }\n    )\n  end\nend",
+          "lang": "ruby"
+        },
+        "app.rb": {
+          "code": "# app.rb\nrequire 'aws-cdk-lib'\nrequire_relative 'stacks/my_stack'\n\napp = AWSCDK::App.new\n\nMyStack.new(app, 'MyStack', {\n  env: AWSCDK::Environment.new(\n    account: ENV['CDK_DEFAULT_ACCOUNT'],\n    region: ENV.fetch('CDK_DEFAULT_REGION', 'us-east-1')\n  )\n})\n\napp.synth",
+          "lang": "ruby"
+        },
+        "Deploy": {
+          "code": "$ bundle install\n$ npm install -g aws-cdk @jsii/runtime\n$ cdk deploy",
+          "lang": "console"
+        }
+      },
+      "conventions": [
+        "<strong>Modules</strong> are PascalCase under <code>AWSCDK</code>: <code>AWSCDK::S3</code>, <code>AWSCDK::DynamoDB</code>, <code>AWSCDK::APIGatewayv2</code>.",
+        "<strong>AWS acronyms are uppercased — in class names too.</strong> <code>RestApi</code> → <code>AWSCDK::APIGateway::RestAPI</code>; <code>FunctionUrl</code> → <code>AWSCDK::Lambda::FunctionURL</code>; <code>…Arn</code> → <code>…ARN</code>.",
+        "<strong>Props</strong> are a Ruby <code>Hash</code> with <strong>snake_case</strong> keys — <code>removal_policy:</code>, not <code>removalPolicy:</code>.",
+        "<strong>Enum members and static properties</strong> are both constants, reached with <code>::</code>: <code>AWSCDK::RemovalPolicy::DESTROY</code>, <code>AWSCDK::Lambda::Runtime::RUBY_4_0</code>. The reference lists a static as a class method (<code>.RUBY_4_0</code>) because that is how it is defined — that spelling works too, but <code>::</code> is the one to reach for."
+      ]
     }
   },
   "constructs": {
