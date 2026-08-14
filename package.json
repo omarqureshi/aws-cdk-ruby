@@ -4,6 +4,6 @@
   "private": true,
   "description": "Ruby naming and distribution for aws-cdk-lib, built with jsii-target-ruby",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   }
 }

@@ -63,7 +63,9 @@ jobs:
         run: |
           ln -sfn "$PWD/plugin" node_modules/jsii-target-ruby 2>/dev/null || {
             mkdir -p node_modules && ln -sfn "$PWD/plugin" node_modules/jsii-target-ruby; }
-          AWS_CDK_LIB="$PWD/work/node_modules/aws-cdk-lib" node --test test/*.test.js
+          # `npm test`, not a copy of it: the invocation lived in two places
+          # and they had already drifted apart.
+          AWS_CDK_LIB="$PWD/work/node_modules/aws-cdk-lib" npm test
 
       - name: Generate the Ruby bindings
         env:
