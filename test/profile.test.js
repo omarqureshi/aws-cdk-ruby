@@ -12,11 +12,18 @@ const { profileHarness } = require('jsii-target-ruby/testing');
  * should be `AWSCDK::S3`. So they are asked here, through the harness the
  * target publishes for exactly this.
  *
- * Needs an installed aws-cdk-lib to run:
- *   AWS_CDK_LIB=node_modules/aws-cdk-lib node --test test/
+ * The profile answers most of them on its own. Two need aws-cdk-lib itself
+ * loaded — the ones that ask what the *installed release* contains:
+ *   AWS_CDK_LIB=node_modules/aws-cdk-lib npm test
  */
 const PROFILE = path.resolve(__dirname, '..', 'config', 'profile.json');
 const ASSEMBLY = process.env.AWS_CDK_LIB;
+
+// Skipped, not quietly passed. A check that does nothing reports the same
+// green as one that ran, and the drift check below is the reason this file
+// exists — reading "5 passed" off a run that verified three of them is how a
+// release ships an unnamed submodule.
+const NEEDS_ASSEMBLY = ASSEMBLY ? false : 'needs an installed aws-cdk-lib; set AWS_CDK_LIB';
 
 describe('the aws-cdk-lib naming profile', () => {
   let h;
@@ -42,11 +49,10 @@ describe('the aws-cdk-lib naming profile', () => {
     assert.equal(h.modulePathFor('aws-cdk-lib.aws_kinesisfirehose'), 'AWSCDK::KinesisFirehose');
   });
 
-  test('resolves the conventional aliases that do not name their submodule', () => {
+  test('resolves the conventional aliases that do not name their submodule', { skip: NEEDS_ASSEMBLY }, () => {
     // `firehose` is aws_kinesisfirehose, `sfn` is aws_stepfunctions. These are
     // how CDK's own examples are written, and getting them wrong puts a
     // constant that does not exist into every published example.
-    if (!ASSEMBLY) return; // resolution by type name needs the assembly
     assert.match(
       h.render("new firehose.DeliveryStream(this, 'S');"),
       /AWSCDK::KinesisFirehose::DeliveryStream/,
@@ -57,12 +63,11 @@ describe('the aws-cdk-lib naming profile', () => {
     );
   });
 
-  test('every submodule of the installed aws-cdk-lib has a name', () => {
+  test('every submodule of the installed aws-cdk-lib has a name', { skip: NEEDS_ASSEMBLY }, () => {
     // The drift check. Every release can add services, and an unnamed one
     // renders as a derived guess (`aws_xyz` -> `Xyz`) that becomes permanent
     // public API the moment it ships. Failing here means somebody has a
     // naming decision to make, which is the point.
-    if (!ASSEMBLY) return;
     const unnamed = h.unnamedSubmodules();
     assert.deepEqual(
       unnamed,
