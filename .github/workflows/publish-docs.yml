@@ -153,6 +153,15 @@ jobs:
         run: |
           OUT="${{ runner.temp }}/docs-site"
           rm -rf "$OUT" && mkdir -p "$OUT"
+          # The dependency's sources join the registry so YARD resolves references
+          # into constructs properly; the plugin rewrites the addresses to its
+          # published pages. Absolute, because yard runs from inside the library
+          # directory and a relative path there links nothing.
+          dep="${{ runner.temp }}/cdk-build/dist/ruby/lib/constructs"
+          if [ -d "$dep" ]; then
+            export CROSSLINK_LIBS="$dep"
+            export YARD_CROSSLINK="$(node -p "require('./config/profile.json').constructs.module")=$(node -p "require('${{ runner.temp }}/cdk-build/node_modules/constructs/package.json').version")"
+          fi
           bash site/docs-gen/build-module-docs.sh "$GEM_LIB" "$OUT"
           ruby site/docs-gen/gen-module-landing.rb "$ASSEMBLY" "$OUT" config/profile.json
           ruby site/docs-gen/inject-crumb.rb "$OUT"
