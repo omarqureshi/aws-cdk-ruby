@@ -159,8 +159,17 @@ jobs:
           # directory and a relative path there links nothing.
           dep="${{ runner.temp }}/cdk-build/dist/ruby/lib/constructs"
           if [ -d "$dep" ]; then
-            export CROSSLINK_LIBS="$dep"
-            export YARD_CROSSLINK="$(node -p "require('./config/profile.json').constructs.module")=$(node -p "require('${{ runner.temp }}/cdk-build/node_modules/constructs/package.json').version")"
+            mod=$(node -p "require('./config/profile.json').constructs.module")
+            ver=$(node -p "require('${{ runner.temp }}/cdk-build/node_modules/constructs/package.json').version")
+            # Only link to a version whose pages exist. The closure resolves
+            # whatever npm gives it, which moves ahead of what has been
+            # documented, and a link to an undocumented version is a 403.
+            if curl -fsI "https://rubygems.omarqureshi.net/docs/$mod/$ver/$mod/index.html" >/dev/null 2>&1; then
+              export CROSSLINK_LIBS="$dep"
+              export YARD_CROSSLINK="$mod=$ver"
+            else
+              echo "::warning::$mod $ver has no published documentation; not linking to it"
+            fi
           fi
           bash site/docs-gen/build-module-docs.sh "$GEM_LIB" "$OUT"
           ruby site/docs-gen/gen-module-landing.rb "$ASSEMBLY" "$OUT" config/profile.json
